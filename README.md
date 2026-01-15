@@ -383,6 +383,11 @@ command:
 ./demo/scripts/create-minikube-cluster.sh
 ```
 
+After building the cluster, the local version of the driver can be loaded:
+```bash
+./demo/scripts/load-driver-image-into-minikube.sh
+```
+
 Then install the driver like shown in [demo](#Demo) section.
 
 To delete the cluster you can run:
