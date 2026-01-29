@@ -10,6 +10,14 @@ spec:
         kubevirt.io/size: small
         kubevirt.io/domain: testvm
     spec:
+      readinessProbe:
+        tcpSocket:
+          port: 22
+        initialDelaySeconds: 0
+        periodSeconds: 5
+        timeoutSeconds: 5
+        successThreshold: 3
+        failureThreshold: 1
       domain:
         devices:
           disks:
