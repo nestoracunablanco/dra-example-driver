@@ -1,6 +1,28 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vm-test
+
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: vm-test
+  name: single-gpu
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.example.com
+
+---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
+  namespace: vm-test
   name: testvm
 spec:
   runStrategy: Halted
@@ -10,6 +32,9 @@ spec:
         kubevirt.io/size: small
         kubevirt.io/domain: testvm
     spec:
+      resourceClaims:
+      - name: gpu-claim
+        resourceClaimTemplateName: single-gpu
       readinessProbe:
         tcpSocket:
           port: 22
@@ -27,6 +52,10 @@ spec:
             - name: cloudinitdisk
               disk:
                 bus: virtio
+          gpus:
+          - claimName: gpu-claim
+            name: example-gpu
+            requestName: gpu
         resources:
           requests:
             memory: 256M
