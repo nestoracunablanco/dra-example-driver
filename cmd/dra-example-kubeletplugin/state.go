@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
+	"k8s.io/kubernetes/pkg/kubelet/checkpointmanager"
 
 	"k8s.io/apimachinery/pkg/types"
 	coreclientset "k8s.io/client-go/kubernetes"
@@ -70,6 +71,7 @@ func (pds PreparedDevices) GetDevices() []*drapbv1.Device {
 type DeviceState struct {
 	sync.Mutex
 	driverName      string
+	pluginDir       string
 	cdi             *CDIHandler
 	driverResources resourceslice.DriverResources
 	allocatable     AllocatableDevices
@@ -79,6 +81,7 @@ type DeviceState struct {
 	checkpointPath    string
 	checkpointDecoder runtime.Decoder
 	checkpointEncoder runtime.Encoder
+	checkpointManager checkpointmanager.CheckpointManager
 
 	coreClient      coreclientset.Interface
 	gpuDeviceStatus bool
@@ -137,6 +140,7 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 
 	state := &DeviceState{
 		driverName:        config.flags.driverName,
+		pluginDir:         config.DriverPluginPath(),
 		cdi:               cdi,
 		driverResources:   driverResources,
 		allocatable:       allocatable,
@@ -174,7 +178,12 @@ func (s *DeviceState) Prepare(ctx context.Context, claim *resourceapi.ResourceCl
 	}
 	s.addClaimToCheckpoint(checkpoint, claim, preparedDevices)
 
-	if err = s.cdi.CreateClaimSpecFile(string(claim.UID), preparedDevices); err != nil {
+	metadataMounts, err := writeClaimMetadata(s.pluginDir, s.driverName, claim, preparedDevices, s.allocatable)
+	if err != nil {
+		return nil, fmt.Errorf("unable to write claim metadata: %v", err)
+	}
+
+	if err = s.cdi.CreateClaimSpecFile(string(claim.UID), preparedDevices, metadataMounts); err != nil {
 		return nil, fmt.Errorf("unable to create CDI spec file for claim: %v", err)
 	}
 
@@ -200,6 +209,10 @@ func (s *DeviceState) Unprepare(claimUID types.UID) error {
 		return fmt.Errorf("unprepare failed: %v", err)
 	}
 	s.removeClaimFromCheckpoint(checkpoint, claimUID)
+
+	if err := deleteClaimMetadata(s.pluginDir, string(claimUID)); err != nil {
+		return fmt.Errorf("unable to delete claim metadata: %v", err)
+	}
 
 	err = s.cdi.DeleteClaimSpecFile(string(claimUID))
 	if err != nil {

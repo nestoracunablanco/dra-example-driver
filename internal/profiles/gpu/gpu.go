@@ -55,9 +55,12 @@ func NewProfile(nodeName string, numGPUs int, partitionsPerGPU int, enableDevice
 	}
 }
 
+const vGPUsPerGPU = 2
+
 func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 	seed := p.nodeName
 	uuids := generateUUIDs(seed, p.numGPUs)
+	mdevUUIDs := generateMDevUUIDs(seed, p.numGPUs*vGPUsPerGPU)
 
 	memoryPerGPU := resource.MustParse("80Gi")
 	computePerGPU := resource.MustParse("100")
@@ -72,6 +75,7 @@ func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 	}
 
 	for i, uuid := range uuids {
+		pciBusID := fmt.Sprintf("0000:00:%02d.0", i+1)
 		attrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
 			"index": {
 				IntValue: ptr.To(int64(i)),
@@ -84,6 +88,12 @@ func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 			},
 			"driverVersion": {
 				VersionValue: ptr.To("1.0.0"),
+			},
+			"resource.kubernetes.io/pciBusID": {
+				StringValue: ptr.To(pciBusID),
+			},
+			"type": {
+				StringValue: ptr.To("gpu"),
 			},
 		}
 
@@ -178,6 +188,46 @@ func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 		}
 	}
 
+	// vGPU devices (mediated) — identified by mdevUUID
+	for i := 0; i < p.numGPUs; i++ {
+		for j := 0; j < vGPUsPerGPU; j++ {
+			vfPCIBusID := fmt.Sprintf("0000:01:%02d.%d", i+1, j)
+			idx := i*vGPUsPerGPU + j
+			device := resourceapi.Device{
+				Name: fmt.Sprintf("gpu-%d-vgpu-%d", i, j),
+				Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+					"index": {
+						IntValue: ptr.To(int64(i)),
+					},
+					"uuid": {
+						StringValue: ptr.To(uuids[i]),
+					},
+					"model": {
+						StringValue: ptr.To("LATEST-GPU-MODEL"),
+					},
+					"driverVersion": {
+						VersionValue: ptr.To("1.0.0"),
+					},
+					"mdevUUID": {
+						StringValue: ptr.To(mdevUUIDs[idx]),
+					},
+					"resource.kubernetes.io/pciBusID": {
+						StringValue: ptr.To(vfPCIBusID),
+					},
+					"type": {
+						StringValue: ptr.To("vgpu"),
+					},
+				},
+				Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
+					"memory": {
+						Value: resource.MustParse("40Gi"),
+					},
+				},
+			}
+			devices = append(devices, device)
+		}
+	}
+
 	resources := resourceslice.DriverResources{
 		Pools: map[string]resourceslice.Pool{
 			p.nodeName: {
@@ -198,6 +248,20 @@ func generateUUIDs(seed string, count int) []string {
 		rand.Read(charset)
 		uuid, _ := uuid.FromBytes(charset)
 		uuids[i] = "gpu-" + uuid.String()
+	}
+
+	return uuids
+}
+
+func generateMDevUUIDs(seed string, count int) []string {
+	rand := rand.New(rand.NewSource(hash(seed + "-mdev")))
+
+	uuids := make([]string, count)
+	for i := 0; i < count; i++ {
+		charset := make([]byte, 16)
+		rand.Read(charset)
+		u, _ := uuid.FromBytes(charset)
+		uuids[i] = u.String()
 	}
 
 	return uuids
