@@ -5,19 +5,22 @@ metadata:
   name: vm-test
 
 ---
+# ResourceClaimTemplate for a vGPU (type=vgpu, has mdevUUID)
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
   namespace: vm-test
-  name: single-gpu
+  name: vgpu-claim-template
 spec:
   spec:
     devices:
       requests:
-      - name: gpu
+      - name: vgpu
         exactly:
           deviceClassName: gpu.example.com
-
+          selectors:
+          - cel:
+              expression: 'device.attributes["gpu.example.com"].type == "vgpu"'
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -33,8 +36,8 @@ spec:
         kubevirt.io/domain: testvm
     spec:
       resourceClaims:
-      - name: gpu-claim
-        resourceClaimTemplateName: single-gpu
+      - name: vgpu-claim
+        resourceClaimTemplateName: vgpu-claim-template
       readinessProbe:
         tcpSocket:
           port: 22
@@ -53,9 +56,9 @@ spec:
               disk:
                 bus: virtio
           hostDevices:
-          - claimName: gpu-claim
-            name: example-gpu
-            requestName: gpu
+          - claimName: vgpu-claim
+            name: vgpu
+            requestName: vgpu
         resources:
           requests:
             memory: 256M
