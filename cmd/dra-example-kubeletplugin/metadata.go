@@ -31,7 +31,7 @@ import (
 
 const (
 	metadataSubDir            = "dra-device-metadata"
-	containerMetadataBasePath = "/var/run/dra-device-attributes"
+	containerMetadataBasePath = "/var/run/kubernetes.io/dra-device-attributes"
 )
 
 // KEP-5304 metadata JSON types — matches what kubevirt's virt-launcher expects.
@@ -75,6 +75,14 @@ func writeClaimMetadata(
 	claimUID := string(claim.UID)
 	claimName := claim.Name
 	claimNs := claim.Namespace
+
+	// For template-generated claims the container path must use the pod-level
+	// claim name (the name the pod author gave it), not the generated claim
+	// object name.  KubeVirt looks up the path using the pod-level name.
+	containerClaimName := claimName
+	if pcn := podClaimName(claim); pcn != nil {
+		containerClaimName = *pcn
+	}
 
 	requestDevices := make(map[string][]metadataDevice)
 	for _, pd := range preparedDevices {
@@ -127,8 +135,16 @@ func writeClaimMetadata(
 			return nil, fmt.Errorf("write metadata file: %w", err)
 		}
 
+		// KEP-5304: the path segment after the base depends on whether the claim
+		// was instantiated from a ResourceClaimTemplate or created directly.
+		var claimKindSegment string
+		if podClaimName(claim) != nil {
+			claimKindSegment = "resourceclaimtemplates"
+		} else {
+			claimKindSegment = "resourceclaims"
+		}
 		containerPath := filepath.Join(
-			containerMetadataBasePath, claimName, reqName, driverName+"-metadata.json",
+			containerMetadataBasePath, claimKindSegment, containerClaimName, reqName, driverName+"-metadata.json",
 		)
 		mounts = append(mounts, &cdispec.Mount{
 			HostPath:      hostPath,

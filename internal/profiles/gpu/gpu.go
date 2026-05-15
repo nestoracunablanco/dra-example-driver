@@ -208,7 +208,18 @@ func (p Profile) ApplyConfig(config runtime.Object, results []*resourceapi.Devic
 		config = configapi.DefaultGpuConfig()
 	}
 	if config, ok := config.(*configapi.GpuConfig); ok {
-		return applyGpuConfig(config, results)
+		return applyGpuConfig(config, results, nil)
+	}
+	return nil, fmt.Errorf("runtime object is not a recognized configuration")
+}
+
+// ApplyConfigWithDevices is an extended version that accepts device information
+func (p Profile) ApplyConfigWithDevices(config runtime.Object, results []*resourceapi.DeviceRequestAllocationResult, allocatableDevices map[string]resourceapi.Device) (profiles.PerDeviceCDIContainerEdits, error) {
+	if config == nil {
+		config = configapi.DefaultGpuConfig()
+	}
+	if config, ok := config.(*configapi.GpuConfig); ok {
+		return applyGpuConfig(config, results, allocatableDevices)
 	}
 	return nil, fmt.Errorf("runtime object is not a recognized configuration")
 }
@@ -217,7 +228,7 @@ func (p Profile) ApplyConfig(config runtime.Object, results []*resourceapi.Devic
 // define a set of environment variables to be injected into the containers
 // that include a given device. A real driver would likely need to do some sort
 // of hardware configuration as well, based on the config passed in.
-func applyGpuConfig(config *configapi.GpuConfig, results []*resourceapi.DeviceRequestAllocationResult) (profiles.PerDeviceCDIContainerEdits, error) {
+func applyGpuConfig(config *configapi.GpuConfig, results []*resourceapi.DeviceRequestAllocationResult, allocatableDevices map[string]resourceapi.Device) (profiles.PerDeviceCDIContainerEdits, error) {
 	perDeviceEdits := make(profiles.PerDeviceCDIContainerEdits)
 
 	// Normalize the config to set any implied defaults.
@@ -261,7 +272,17 @@ func applyGpuConfig(config *configapi.GpuConfig, results []*resourceapi.DeviceRe
 		// For vGPU devices (mediated devices), add the VFIO device nodes
 		// Check if device name contains "vgpu" to identify mediated devices
 		if isVGPUDevice(result.Device) {
-			deviceNodes, err := getVFIODeviceNodesForMdev(result.Device)
+			// Get mdevUUID from device attributes if available
+			var mdevUUID string
+			if allocatableDevices != nil {
+				if device, exists := allocatableDevices[result.Device]; exists {
+					if attr, ok := device.Attributes["mdevUUID"]; ok && attr.StringValue != nil {
+						mdevUUID = *attr.StringValue
+					}
+				}
+			}
+
+			deviceNodes, err := getVFIODeviceNodesForMdev(result.Device, mdevUUID)
 			if err != nil {
 				return nil, fmt.Errorf("unable to get VFIO device nodes for %s: %w", result.Device, err)
 			}
@@ -282,13 +303,15 @@ func isVGPUDevice(deviceName string) bool {
 }
 
 // getVFIODeviceNodesForMdev returns the VFIO device nodes needed for a mediated device
-func getVFIODeviceNodesForMdev(deviceName string) ([]*cdispec.DeviceNode, error) {
+func getVFIODeviceNodesForMdev(deviceName string, mdevUUID string) ([]*cdispec.DeviceNode, error) {
 	// For mediated devices, we need:
 	// 1. /dev/vfio/vfio - the VFIO container device
 	// 2. /dev/vfio/<iommu_group> - the specific IOMMU group device
 
-	// The hardcoded mdev UUID from the driver
-	mdevUUID := "d2698c15-d97b-417f-9de6-542028c0579c"
+	// If no mdevUUID provided, use the hardcoded default for backward compatibility
+	if mdevUUID == "" {
+		mdevUUID = "d2698c15-d97b-417f-9de6-542028c0579c"
+	}
 
 	// Try to find the IOMMU group for this mdev
 	iommuGroupPath := filepath.Join("/sys/bus/mdev/devices", mdevUUID, "iommu_group")

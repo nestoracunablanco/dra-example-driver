@@ -244,7 +244,21 @@ func (s *DeviceState) prepareDevices(claim *resourceapi.ResourceClaim) (profiles
 	perDeviceCDIContainerEdits := make(profiles.PerDeviceCDIContainerEdits)
 	for config, results := range configResultsMap {
 		// Apply the config to the list of results associated with it.
-		containerEdits, err := s.configHandler.ApplyConfig(config, results)
+		// Try to use the extended method if available, otherwise fall back to the standard one
+		var containerEdits profiles.PerDeviceCDIContainerEdits
+		var err error
+
+		// Type assert to check if the handler supports the extended interface
+		type extendedConfigHandler interface {
+			ApplyConfigWithDevices(runtime.Object, []*resourceapi.DeviceRequestAllocationResult, map[string]resourceapi.Device) (profiles.PerDeviceCDIContainerEdits, error)
+		}
+
+		if extHandler, ok := s.configHandler.(extendedConfigHandler); ok {
+			containerEdits, err = extHandler.ApplyConfigWithDevices(config, results, s.allocatable)
+		} else {
+			containerEdits, err = s.configHandler.ApplyConfig(config, results)
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("error applying config: %w", err)
 		}
