@@ -23,6 +23,9 @@ set -o pipefail
 # A reference to the current directory where this script is located
 CURRENT_DIR="$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)"
 
+# Delete vm-test namespace to allow multiple runs of this script
+kubectl delete namespace vm-test || true
+
 # Deploy vm yaml (not starting it yet)
 kubectl apply -f "${CURRENT_DIR}/vm-test.yaml"
 

@@ -132,6 +132,9 @@ test-e2e:
 test-e2e-minikube:
 	test/e2e/e2e-minikube.sh
 
+test-e2e-kubevirt-minikube:
+	test/e2e/e2e-kubevirt-minikube.sh
+
 teardown-e2e:
 	test/e2e/teardown-e2e.sh
 
